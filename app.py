@@ -1,9 +1,7 @@
-from flask import Flask, request
-from flask_http_proxy import Proxy
-import time, threading, os, requests
+from flask import *
+import threading, time, subprocess, requests
 
 app = Flask(__name__)
-proxy = Proxy()
 
 # Define API and Web paths
 api_path = "https://example.com/api"
@@ -29,15 +27,28 @@ def runalwaysactive():
     threading.Thread(target=run_gitpod_script).start()
     return "Miyan"
 
-@app.route('/api/<path:path>')
-def proxy_api(path):
-    headers = add_ip_header(request.headers)
-    return proxy.perform_request(f'{api_path}/{path}', headers=headers)
+def proxy_request(path, target_base_url):
+    headers = {key: value for key, value in request.headers if key.lower() != 'host'}
+    headers = add_ip_header(headers)
+    response = requests.request(
+        method=request.method,
+        url=f'{target_base_url}/{path}',
+        headers=headers,
+        data=request.get_data(),
+        cookies=request.cookies,
+        allow_redirects=True
+    )
+    excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+    headers = [(name, value) for name, value in response.raw.headers.items() if name.lower() not in excluded_headers]
+    return Response(response.content, response.status_code, headers)
 
-@app.route('/web/<path:path>')
+@app.route('/api=['GET', 'POST', 'PUT', 'DELETE'])
+def proxy_api(path):
+    return proxy_request(path, api_path)
+
+@app.route('/web/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def proxy_auth(path):
-    headers = add_ip_header(request.headers)
-    return proxy.perform_request(f'{web_path}/{path}', headers=headers)
+    return proxy_request(path, web_path)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=False)
+    app.run(host='0.0.0.0')
